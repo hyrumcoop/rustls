@@ -380,6 +380,10 @@ impl<'a> PrefixedPayloadBorrowed<'a> {
         }
     }
 
+    pub fn extend_len(&mut self, len: usize) {
+        self.payload_len += len;
+    }
+
     pub fn truncate(&mut self, len: usize) {
         // TODO: should we clear the data that has been truncated to avoid leaking anything?
         self.payload_len = len
