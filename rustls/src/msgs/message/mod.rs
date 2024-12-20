@@ -14,7 +14,7 @@ mod outbound;
 use alloc::vec::Vec;
 
 pub(crate) use outbound::read_opaque_message_header;
-pub use outbound::{OutboundChunks, OutboundOpaqueMessage, OutboundPlainMessage, PrefixedPayload};
+pub use outbound::{OutboundChunks, OutboundOpaqueMessage, OutboundOpaqueMessageBorrowed, OutboundPlainMessage, PrefixedPayload, PrefixedPayloadBorrowed};
 
 #[derive(Debug)]
 pub enum MessagePayload<'a> {

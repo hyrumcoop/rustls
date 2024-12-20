@@ -12,7 +12,7 @@ use crate::crypto::tls13::{Hkdf, HkdfExpander, OkmBlock, OutputLengthError};
 use crate::enums::{CipherSuite, ContentType, ProtocolVersion};
 use crate::error::Error;
 use crate::msgs::message::{
-    InboundPlainMessage, OutboundOpaqueMessage, OutboundPlainMessage, PrefixedPayload,
+    InboundPlainMessage, OutboundOpaqueMessage, OutboundOpaqueMessageBorrowed, OutboundPlainMessage, PrefixedPayload, PrefixedPayloadBorrowed
 };
 use crate::suites::{CipherSuiteCommon, ConnectionTrafficSecrets, SupportedCipherSuite};
 use crate::tls13::Tls13CipherSuite;
@@ -309,6 +309,31 @@ impl MessageEncrypter for GcmMessageEncrypter {
             .map_err(|_| Error::EncryptError)?;
 
         Ok(OutboundOpaqueMessage::new(
+            ContentType::ApplicationData,
+            ProtocolVersion::TLSv1_2,
+            payload,
+        ))
+    }
+
+    fn encrypt_into<'a>(
+        &mut self,
+        msg: OutboundPlainMessage<'_>,
+        outgoing_buffer: &'a mut [u8],
+        seq: u64,
+    ) -> Result<OutboundOpaqueMessageBorrowed<'a>, Error> {
+        let total_len = self.encrypted_payload_len(msg.payload.len());
+        let mut payload = PrefixedPayloadBorrowed::new(outgoing_buffer);
+
+        let nonce = aead::Nonce::assume_unique_for_key(Nonce::new(&self.iv, seq).0);
+        let aad = aead::Aad::from(make_tls13_aad(total_len));
+        payload.extend_from_chunks(&msg.payload);
+        payload.extend_from_slice(&msg.typ.to_array());
+
+        self.enc_key
+            .seal_in_place_append_tag(nonce, aad, &mut payload)
+            .map_err(|_| Error::EncryptError)?;
+
+        Ok(OutboundOpaqueMessageBorrowed::new(
             ContentType::ApplicationData,
             ProtocolVersion::TLSv1_2,
             payload,

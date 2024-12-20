@@ -211,6 +211,70 @@ impl OutboundOpaqueMessage {
     }
 }
 
+/// A TLS frame, named `TLSPlaintext` in the standard.
+///
+/// This outbound type owns all memory for its interior parts.
+/// It results from encryption and is used for io write.
+#[derive(Debug)]
+pub struct OutboundOpaqueMessageBorrowed<'a> {
+    pub typ: ContentType,
+    pub version: ProtocolVersion,
+    pub payload: PrefixedPayloadBorrowed<'a>,
+}
+
+impl<'a> OutboundOpaqueMessageBorrowed<'a> {
+    /// Construct a new `OpaqueMessage` from constituent fields.
+    ///
+    /// `body` is moved into the `payload` field.
+    pub fn new(typ: ContentType, version: ProtocolVersion, payload: PrefixedPayloadBorrowed<'a>) -> Self {
+        Self {
+            typ,
+            version,
+            payload,
+        }
+    }
+
+    // TODO: Maybe we can make this work. Should figure out what the use case is first
+    /// Construct by decoding from a [`Reader`].
+    ///
+    /// `MessageError` allows callers to distinguish between valid prefixes (might
+    /// become valid if we read more data) and invalid data.
+    /*pub fn read(r: &mut Reader<'_>) -> Result<Self, MessageError> {
+        let (typ, version, len) = read_opaque_message_header(r)?;
+
+        let content = r
+            .take(len as usize)
+            .ok_or(MessageError::TooShortForLength)?;
+
+        Ok(Self {
+            typ,
+            version,
+            payload: PrefixedPayload::from(content),
+        })
+    }*/
+
+    pub fn encode(self) -> (&'a mut [u8], &'a mut [u8]) {
+        let length = self.payload.len() as u16;
+        let encoded_payload = self.payload.buffer;
+        encoded_payload[0] = self.typ.into();
+        encoded_payload[1..3].copy_from_slice(&self.version.to_array());
+        encoded_payload[3..5].copy_from_slice(&(length).to_be_bytes());
+        encoded_payload.split_at_mut(HEADER_SIZE + length as usize)
+    }
+
+    /*/// Force conversion into a plaintext message.
+    ///
+    /// This should only be used for messages that are known to be in plaintext. Otherwise, the
+    /// `OutboundOpaqueMessage` should be decrypted into a `PlainMessage` using a `MessageDecrypter`.
+    pub fn into_plain_message(self) -> PlainMessage {
+        PlainMessage {
+            version: self.version,
+            typ: self.typ,
+            payload: Payload::Owned(self.payload.as_ref().to_vec()),
+        }
+    }*/
+}
+
 #[derive(Clone, Debug)]
 pub struct PrefixedPayload(Vec<u8>);
 
@@ -268,6 +332,80 @@ impl From<&[u8]> for PrefixedPayload {
 impl<const N: usize> From<&[u8; N]> for PrefixedPayload {
     fn from(content: &[u8; N]) -> Self {
         Self::from(&content[..])
+    }
+}
+
+#[derive(Debug)]
+pub struct PrefixedPayloadBorrowed<'a> {
+    buffer: &'a mut [u8],
+    payload_len: usize,
+}
+
+impl<'a> PrefixedPayloadBorrowed<'a> {
+    pub fn new(buffer: &'a mut [u8]) -> Self {
+        Self {
+            buffer,
+            payload_len: 0
+        }
+    }
+
+    /*pub fn with_capacity(buffer: &'a mut [u8], capacity: usize) -> (Self, &'a mut [u8]) {
+        let (prefixed_payload, remaining) = buffer.split_at_mut(HEADER_SIZE + capacity);
+        (Self(prefixed_payload), remaining)
+    }*/
+
+    pub fn extend_from_slice(&mut self, slice: &[u8]) {
+        self.buffer[self.payload_len..self.payload_len + slice.len()].copy_from_slice(slice);
+    }
+
+    pub fn extend_from_chunks(&mut self, chunks: &OutboundChunks<'_>) {
+        match chunks {
+            &OutboundChunks::Single(chunk) => self.extend_from_slice(chunk),
+            &OutboundChunks::Multiple { chunks, start, end } => {
+                let mut size = 0;
+                for chunk in chunks.iter() {
+                    let psize = size;
+                    let len = chunk.len();
+                    size += len;
+                    if size <= start || psize >= end {
+                        continue;
+                    }
+                    let start = start.saturating_sub(psize);
+                    let end = if end - psize < len { end - psize } else { len };
+                    self.extend_from_slice(&chunk[start..end]);
+                }
+            }
+        }
+    }
+
+    pub fn truncate(&mut self, len: usize) {
+        // TODO: should we clear the data that has been truncated to avoid leaking anything?
+        self.payload_len = len
+    }
+
+    fn len(&self) -> usize {
+        self.payload_len
+    }
+}
+
+impl<'a> AsRef<[u8]> for PrefixedPayloadBorrowed<'a> {
+    fn as_ref(&self) -> &[u8] {
+        &self.buffer[HEADER_SIZE..HEADER_SIZE + self.payload_len]
+    }
+}
+
+impl<'a> AsMut<[u8]> for PrefixedPayloadBorrowed<'a> {
+    fn as_mut(&mut self) -> &mut [u8] {
+        &mut self.buffer[HEADER_SIZE..HEADER_SIZE + self.payload_len]
+    }
+}
+
+impl<'a, 'b> Extend<&'a u8> for PrefixedPayloadBorrowed<'b> {
+    fn extend<T: IntoIterator<Item = &'a u8>>(&mut self, iter: T) {
+        // TODO: I don't think I wrote this in a way that can be optimized by the compiler
+        for byte in iter {
+            self.extend_from_slice(&[*byte]);
+        }
     }
 }
 
