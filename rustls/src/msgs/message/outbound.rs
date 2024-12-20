@@ -355,7 +355,9 @@ impl<'a> PrefixedPayloadBorrowed<'a> {
     }*/
 
     pub fn extend_from_slice(&mut self, slice: &[u8]) {
-        self.buffer[self.payload_len..self.payload_len + slice.len()].copy_from_slice(slice);
+        let buffer_end = HEADER_SIZE + self.payload_len;
+        self.buffer[buffer_end..buffer_end + slice.len()].copy_from_slice(slice);
+        self.payload_len += slice.len();
     }
 
     pub fn extend_from_chunks(&mut self, chunks: &OutboundChunks<'_>) {
