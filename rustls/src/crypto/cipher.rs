@@ -164,7 +164,8 @@ pub trait MessageEncrypter: Send + Sync {
         outgoing_buffer: &'a mut [u8],
         seq: u64,
     ) -> Result<OutboundOpaqueMessageBorrowed<'a>, Error> {
-        Err(Error::EncryptError)
+        let em = self.encrypt(msg, seq)?;
+        Ok(em.copy_to_borrowed(outgoing_buffer))
     }
 
     /// Return the length of the ciphertext that results from encrypting plaintext of

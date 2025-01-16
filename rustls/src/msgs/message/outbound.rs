@@ -209,6 +209,14 @@ impl OutboundOpaqueMessage {
             payload: Payload::Owned(self.payload.as_ref().to_vec()),
         }
     }
+
+    pub fn copy_to_borrowed<'a>(&self, outgoing_buffer: &'a mut [u8]) -> OutboundOpaqueMessageBorrowed<'a> {
+        OutboundOpaqueMessageBorrowed {
+            typ: self.typ,
+            version: self.version,
+            payload: self.payload.copy_to_borrowed(outgoing_buffer)
+        }
+    }
 }
 
 /// A TLS frame, named `TLSPlaintext` in the standard.
@@ -299,6 +307,12 @@ impl PrefixedPayload {
 
     fn len(&self) -> usize {
         self.0.len() - HEADER_SIZE
+    }
+
+    pub fn copy_to_borrowed<'a>(&self, outgoing_buffer: &'a mut [u8]) -> PrefixedPayloadBorrowed<'a> {
+        let mut payload_borrowed = PrefixedPayloadBorrowed::new(outgoing_buffer);
+        payload_borrowed.extend_from_slice(self.as_ref());
+        payload_borrowed
     }
 }
 
